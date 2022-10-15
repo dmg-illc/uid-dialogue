@@ -1,0 +1,431 @@
+---
+title: "Analysis: Construction Repetition"
+output: html_document
+date: '2022-05-19'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(lmerTest)
+library(lme4)
+# library(tidyverse)
+library(ggplot2)
+library(readr)
+library(magrittr)
+library(dplyr)
+#
+library(reshape2)
+# library(rjags)
+# library(BayesianFirstAid)
+library(effects)
+library(jtools)
+```
+
+
+## Load data and rename variables for convenience
+```{r,  echo=FALSE}
+data <- read_csv('/Users/mario/code/exp-rep/paper/aacl2022/submission/code/chains_all_SBNC_gpt2_50_1e-3.csv')
+# data$logFE1 <- log2(data$FE1)
+# data$logFE2 <- log2(data$FE2)
+# data$logFE3 <- log2(data$FE3)
+# data$logFE4 <- log2(data$FE4)
+# data$logFE5 <- log2(data$FE5)
+# data$logFE10 <- log2(data$FE10)
+# data$logFE15 <- log2(data$FE15)
+# data$logFE20 <- log2(data$FE20)
+# data$logFE25 <- log2(data$FE25)
+# data$logFE30 <- log2(data$FE30)
+data$`Facilitating Effect` <- data$FE
+data$CurrentTurn <- data$CurrentTurn + 1
+data$`log Utterance Position` <- log2(data$CurrentTurn)
+data$`log Information Content` <- log2(data$S)
+data$`log Distance` <- log2(data$RecencyBoth)
+# data$logRecencyOther <- log2(data$`RecencyOther`)
+# data$logRecencySame <- log2(data$`RecencySame`)
+data$RecencyOther <- NULL
+data$RecencySame <- NULL
+data$SS <- NULL
+data$`log Repetition Index` <- log2(data$`RepetitionIndex`)
+data$`Repetition Index` <- data$RepetitionIndex - 1
+data$logCurrentSpan <- log2(data$`CurrentSpanningTokens`)
+data$logTotalSpan <- log2(data$`TotalSpanningTurns`)
+data$`log Construction Length` <- log2(data$`Length`)
+data$logFreq <- log2(data$`Frequency`)
+data$logFreeFreq <- log2(data$`FreeFrequency`)
+data$`log Repetition Index in Utterance` <- log2(data$`IndexInTurn` + 1)
+data$`Previous Same Utterance` <- data$PreviousInSameTurn
+data$`Referential` <- data$Topical
+```
+
+### First mentions vs. repetitions
+
+Split usages according to whether they are first mentions (RepetitionIndex = 1) or repetitions (RepetitionIndex > 1).
+
+```{r}
+tags <- c("\nFirst mentions", "\nRepetitions")
+
+dH1 <- as_tibble(data) %>% 
+   mutate(Repetition = case_when(
+     `Repetition Index` == 0 ~ tags[1],
+     `Repetition Index` >= 1  ~ tags[2]
+))
+
+dH1$Repetition <- factor(dH1$Repetition, levels = tags, ordered = FALSE)
+summary(dH1$Repetition)
+```
+
+
+Box plot of facilitating effect for first mentions and repetitions
+
+```{r message=FALSE, warning=FALSE}
+pdf(file = "/Users/mario/code/exp-rep/paper/aacl2022/figures/fe-rep-first.pdf",
+    width = 6,
+    height = 6)
+
+ggplot(data = dH1, mapping = aes(x=Repetition,y=FE)) + 
+  geom_jitter(aes(color='blue'),alpha=0.2) +
+  geom_boxplot(fill="bisque",color="black",alpha=0.3,range=0.1,outline=FALSE) + 
+  labs(x='') + labs(y='') +
+  guides(color=FALSE) +
+  theme_minimal() +
+  theme(text = element_text(size=25))
+dev.off()
+```
+
+#### T-tests
+```{r}
+t.test(FE ~ Repetition, data=dH1)
+t.test(S ~ Repetition, data=dH1)
+```
+
+
+### Cumulativity 
+
+Group repetition indices into bins
+```{r}
+tags <- c("1", "2", "3", "4", "5", "6+")
+dH2 <- as_tibble(data[data$`Repetition Index` > 0,]) %>% 
+   mutate(RepIndex = case_when(
+     `Repetition Index` == 1 ~ tags[1],
+     `Repetition Index` == 2 ~ tags[2],
+     `Repetition Index` == 3 ~ tags[3],
+     `Repetition Index` == 4 ~ tags[4],
+     `Repetition Index` == 5 ~ tags[5],
+     `Repetition Index`  > 5 ~ tags[6]
+     ))
+dH2$RepIndex <- factor(dH2$RepIndex, levels = tags, ordered = FALSE)
+summary(dH2$RepIndex)
+```
+
+
+Box plot of FE for repetition index bins
+
+```{r message=FALSE, warning=FALSE}
+pdf(file = "/Users/mario/code/exp-rep/paper/aacl2022/figures/fe-cumul.pdf",
+    width = 6,
+    height = 6)
+
+ggplot(data = dH2, mapping = aes(x= RepIndex,y=FE)) + 
+  geom_jitter(aes(color='blue'),alpha=0.2) +
+  geom_boxplot(fill="bisque",color="black",alpha=0.3) + 
+  # labs(x='\nRepetition index') + 
+  labs(x='\nRepetition Index') +
+  labs(y='') +
+  guides(color=FALSE) +
+  theme_minimal() +
+  theme(text = element_text(size=25))
+
+dev.off()
+```
+
+
+### Decay
+
+Group recency values into bins
+```{r}
+tags <- c("0-30", "30-100", "100-200", "200-400", "400-800", "800+")
+d <- data[data$`Repetition Index` > 0,]
+dgroup <- as_tibble(d) %>% 
+   mutate(Recency = case_when(
+   		`RecencyBoth` >= 0 & `RecencyBoth` <= 30 ~ tags[1],
+    	`RecencyBoth` > 30 & `RecencyBoth` <= 100 ~ tags[2],
+    	`RecencyBoth` > 100 & `RecencyBoth` <= 200 ~ tags[3],
+    	`RecencyBoth` > 200 & `RecencyBoth` <= 400 ~ tags[4],
+    	`RecencyBoth` > 400 & `RecencyBoth` <= 800 ~ tags[5],
+		`RecencyBoth` > 800  ~ tags[6],
+	  ))
+dgroup$Recency <- factor(dgroup$Recency, levels = tags, ordered = FALSE)
+summary(dgroup$Recency)
+```
+
+
+Box plot of FE for the recency bins
+
+```{r message=FALSE, warning=FALSE}
+pdf(file = "/Users/mario/code/exp-rep/paper/aacl2022/figures/fe-decay.pdf",
+    width = 6,
+    height = 6)
+
+ggplot(data = dgroup, mapping = aes(x=Recency,y=FE)) + 
+  geom_jitter(aes(color='blue'),alpha=0.2) +
+  geom_boxplot(fill="bisque",color="black",alpha=0.3) + 
+  # labs(x='\nRecency (tokens)') + 
+  labs(x='Distance') +
+  labs(y='') +
+  guides(color=FALSE) +
+  theme_minimal() +
+  theme(text = element_text(size=25),
+  	axis.text.x = element_text(angle=45, hjust=1))
+
+dev.off()
+```
+
+
+### Construction length
+
+Group constructions by length (number of words)
+```{r}
+tags = c("3", "4", "5", "6", "7")
+dgroup <- as_tibble(data[data$RecencyBoth >= -1,]) %>% 
+   mutate(len = case_when(
+     Length == 3 ~ tags[1],
+     Length == 4 ~ tags[2],
+     Length == 5 ~ tags[3],
+     Length == 6 ~ tags[4],
+     Length == 7 ~ tags[5],
+     ))   
+dgroup$len <- factor(dgroup$len, levels = tags, ordered = FALSE)
+summary(dgroup$len)
+```
+
+
+Box plot of FE for each construction length
+```{r message=FALSE, warning=FALSE}
+ggplot(data = dgroup, mapping = aes(x=len,y=FE)) + 
+  geom_jitter(aes(color='blue'),alpha=0.2) +
+  geom_boxplot(fill="bisque",color="black",alpha=0.3) + 
+  labs(x='\nConstruction Length') + labs(y='\nFacilitating effect') +
+  guides(color=FALSE) +
+  theme_minimal()
+```
+
+
+### Repetition index within the utteracce
+
+Group by repetition index within the utterance
+
+```{r}
+tags <- c("0", "1", "2", "3", "4", "5+") 
+dgroup <- as_tibble(data[data$`Repetition Index` > 0,]) %>% 
+   mutate(RepIndexInTurn = case_when(
+     IndexInTurn == 0 ~ tags[1],
+     IndexInTurn == 1 ~ tags[2],
+     IndexInTurn == 2 ~ tags[3],
+     IndexInTurn == 3 ~ tags[4],
+     IndexInTurn == 4 ~ tags[5],
+     IndexInTurn >= 5 ~ tags[6],
+     ))
+
+dgroup$RepIndexInTurn <- factor(dgroup$RepIndexInTurn, levels = tags, ordered = FALSE)
+summary(dgroup$RepIndexInTurn)
+```
+
+
+Box plot of FE for repetition index in current utterance
+
+```{r message=FALSE, warning=FALSE}
+
+pdf(file = "/Users/mario/code/exp-rep/paper/aacl2022/figures/fe-repindex-in-utt.pdf",
+    width = 6,
+    height = 6)
+
+ggplot(data = dgroup, mapping = aes(x=RepIndexInTurn,y=FE)) + 
+  geom_jitter(aes(color='blue'),alpha=0.2) +
+  geom_boxplot(fill="bisque",color="black",alpha=0.3) + 
+  labs(x='\nRep. Index in Utterance') + 
+  labs(y='\nFacilitating Effect') +
+  guides(color=FALSE) +
+  theme_minimal() +
+  theme(text = element_text(size=25))
+
+dev.off
+```
+
+
+## Referential vs. Non-referential
+
+```{r}
+tags <- c("Referential", "Non-referential")
+
+dH1 <- as_tibble(data) %>% 
+   mutate(`IsReferential` = case_when(
+     `Referential` == TRUE ~ tags[1],
+     `Referential` == FALSE  ~ tags[2]
+))
+
+dH1$IsTopical <- factor(dH1$IsReferential, levels = tags, ordered = FALSE)
+summary(dH1$IsTopical)
+```
+
+
+Referential vs. Non-referential
+```{r message=FALSE, warning=FALSE}
+ggplot(data = dH1, mapping = aes(x=IsReferential,y=FE)) + 
+  geom_jitter(aes(color='blue'),alpha=0.2) +
+  geom_boxplot(fill="bisque",color="black",alpha=0.3,range=0.1,outline=FALSE) + 
+  labs(x='') + labs(y='Facilitating effect') +
+  guides(color=FALSE) +
+  theme_minimal()
+```
+
+
+T-tests
+
+```{r}
+t.test(FE ~ Referential, data=dH1)
+t.test(S ~ Referential, data=dH1)
+```
+
+
+
+```{r}
+firstmentions <- data[data$`RepetitionIndex` == 1,]
+repetitions <- data[data$`RepetitionIndex` > 1,]
+nrow(firstmentions) / nrow(data)
+nrow(repetitions) / nrow(data)
+
+t.test(FE ~ Referential, data=firstmentions)
+t.test(S ~ Referential, data=firstmentions)
+
+t.test(FE ~ Referential, data=repetitions)
+t.test(S ~ Referential, data=repetitions)
+```
+
+### PMI
+
+```{r}
+d_generic <- data[data$PMI <= 1,]
+d_specific <- data[data$PMI == max(data$PMI),]
+summary(d_generic$FE)
+summary(d_specific$FE)
+```
+
+```{r}
+d_generic$group <- 'Agnostic'
+d_specific$group <- 'Specific'
+plot.data <- rbind(d_generic, d_specific)
+```
+
+```{r}
+t.test(d_generic$FE, d_specific$FE)
+t.test(d_generic$S, d_specific$S)
+```
+
+
+```{r message=FALSE, warning=FALSE}
+pdf(file = "/Users/mario/code/exp-rep/paper/aacl2022/submission/figures/fe-pmi.pdf",
+    width = 6,
+    height = 6)
+ggplot(data = plot.data, mapping = aes(x=group,y=FE)) +
+  geom_jitter(aes(color='blue'),alpha=0.2) +
+  geom_boxplot(fill="bisque",color="black",alpha=0.3) +
+  labs(x='\nPMI') +
+  labs(y='') +
+  guides(color=FALSE) +
+  theme_minimal() +
+  theme(text = element_text(size=25))
+dev.off()
+```
+
+
+
+### Linear Mixed Effect Models
+
+Only look at repetitions.
+```{r}
+reps <- data[data$`Repetition Index` > 0,]
+```
+
+
+Most complex FE model; ablation starts from here
+```{r}
+
+# fit.fe.all <- lmer(FE ~ 1 + `log Utterance Position` + `log Construction Length` + `log Repetition Index` + `log Distance` + `Previous Same Utterance` + `log Repetition Index in Utterance` + `PMI` + `Referential` + (1 | `Dialogue ID`/Speaker), reps)
+# 
+# anova(fit.fe.all)
+
+fit.fe.best <- lmer(`Facilitating Effect` ~ 1 + `log Utterance Position` + `log Construction Length` + `log Repetition Index` + `log Distance` + `Previous Same Utterance` + `log Repetition Index in Utterance` + `PMI` + `Referential` + (1 | `Dialogue ID`/Speaker), reps)
+
+summary(fit.fe.best)
+```
+
+
+```{r}
+# summary(fit.s.best)
+summ(fit.fe.best, scale = TRUE, n.sd = 2,  confint = TRUE, digits = 3)
+```
+
+```{r message=FALSE, warning=FALSE}
+pdf(file = "/Users/mario/code/exp-rep/paper/aacl2022/figures/lme-coefficients.pdf",
+    width = 6,
+    height = 6)
+
+plot_summs(fit.fe.best, scale = TRUE, n.sd = 2, plot.distributions = TRUE, colors='#3da4ab')
+dev.off
+```
+
+
+```{r}
+# fit.s.all <- lmer(S ~ 1 + logCurrentTurn + logLength + logRepetitionIndex + logDistance + PreviousInSameTurn + logRepIndexInTurn + SharedCurrently + SameAsFirstSpeaker + SameAsPreviousSpeaker + logCurrentSpan + PMI + Topical + (1 | `Dialogue ID`/Speaker), reps)
+
+fit.s.best <- lmer(`log Information Content` ~ 1 + `log Utterance Position` + `log Construction Length` + `log Repetition Index` + `log Distance` + `Previous Same Utterance` + `log Repetition Index in Utterance` + `PMI` + `Referential` + (1 | `Dialogue ID`/Speaker), reps)
+
+# summary(fit.s.best)
+summ(fit.s.best, scale = TRUE, n.sd = 2,  confint = TRUE, digits = 3)
+# summ(fit.s.best, scale = TRUE)
+```
+
+
+```{r message=FALSE, warning=FALSE}
+plot_summs(fit.s.best, fit.fe.best, scale = TRUE, n.sd = 2, model.names=c('Information Content', 'Facilitating Effect'))
+```
+
+```{r}
+props <- read_csv('/Users/mario/code/exp-rep/paper/aacl2022/submission/code/proportions.csv')
+fit.prop.all <- lmer(propConstr ~ 1 +  uttID + (1 | dial_id), props)
+summ(fit.prop.all, scale = TRUE, n.sd = 2,  confint = TRUE, digits = 3)
+```
+
+
+```{r}
+data_non <- read_csv('/Users/mario/code/exp-rep/paper/aacl2022/submission/code/non-constructions.csv')
+```
+```{r}
+t.test(data$S, data_non$S)
+t.test(data$FE, data_non$FE)
+```
+
+
+```{r message=FALSE, warning=FALSE}
+data$isConstr <- 'Constructions'
+data_non$isConstr <- 'Other Sequences'
+
+common_cols <- intersect(colnames(data), colnames(data_non))
+plot.data <- rbind(subset(data, select = common_cols), subset(data_non, select = common_cols))
+
+pdf(file = "/Users/mario/code/exp-rep/paper/aacl2022/submission/figures/fe-constr-nonconstr.pdf",
+    width = 6,
+    height = 6)
+
+ggplot(data = plot.data, mapping = aes(x=isConstr,y=FE)) + 
+  geom_jitter(aes(color='blue'),alpha=0.2) +
+  geom_boxplot(fill="bisque",color="black",alpha=0.3) + 
+  scale_y_continuous(breaks = round(seq(-15, +15, by = 5),1)) +
+  labs(x='') + labs(y='Facilitataing Effect') +
+  guides(color=FALSE) +
+  theme_minimal() +
+  theme(text = element_text(size=25)) +
+  coord_cartesian(ylim = c(-10, 11.5))
+
+dev.off()
+```

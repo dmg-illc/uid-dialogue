@@ -1,0 +1,43 @@
+---
+title: "turn"
+output: html_document
+date: '2022-05-06'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(lmerTest)
+library(lme4)
+# library(tidyverse)
+library(ggplot2)
+library(readr)
+library(magrittr)
+library(dplyr)
+#
+library(reshape2)
+# library(rjags)
+# library(BayesianFirstAid)
+library(effects)
+```
+
+```{r}
+data <- read_csv('/Users/mario/code/exp-rep/paper/sigdial2022/code/estimates/surprisal_SBNC_gpt2_50_1e-3_agg.csv')
+data$logTurnS <- log2(data$TurnSurprisal)
+data$logTurnLen <- log2(data$`N tokens`)
+data$logPos <- log2(data$`Turn index` + 1)
+data$pos <- log2(data$`Turn index prop`)
+```
+
+```{r}
+fit.all <- lmer(logTurnS ~ 1 + logTurnLen + logPos + (1 | `Dialogue ID`), data)
+
+fit.above10 <- lmer(logTurnS ~ 1 + logTurnLen + logPos + (1 | `Dialogue ID`), data[data$`Turn index` >= 10,])
+
+fit.below10 <- lmer(logTurnS ~ 1 + logTurnLen + logPos + (1 | `Dialogue ID`), data[data$`Turn index` < 7,])
+
+# summary(fit.s.best)
+summ(fit.all, scale = TRUE, n.sd = 2,  confint = TRUE, digits = 3)
+summ(fit.above10, scale = TRUE, n.sd = 2,  confint = TRUE, digits = 3)
+summ(fit.below10, scale = TRUE, n.sd = 2,  confint = TRUE, digits = 3)
+```
+
