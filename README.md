@@ -6,4 +6,4 @@ This is the repository for:
 
 For an overview of this line of work you can also take a look at this [slide deck](https://www.mn.uio.no/ifi/english/research/groups/ltg/research-seminar/ltg-seminar-14mar2022-public.pdf).
 
-For any questions regarding the contents of this repository, and to obtain the data used in our experiments, please contact Mario Giulianelli at m.giulianelli@uva.nl.
+For any questions regarding the contents of this repository, and to obtain the data used in our experiments, please contact Mario Giulianelli at mgiulianelli@inf.ethz.ch.
